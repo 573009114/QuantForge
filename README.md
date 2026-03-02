@@ -352,4 +352,22 @@ curl -X DELETE http://localhost:8080/api/v1/strategies/stg_1 \
   -H "X-Role: Admin"
 ```
 
+
+6. 触发回测（需要 Admin / Quant Developer）
+
+```bash
+curl -X POST http://localhost:8080/api/v1/backtests \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: tenant-a" \
+  -H "X-Role: Quant Developer" \
+  -d '{"strategyId":"stg_1","parameters":{"start":"2024-01-01","end":"2024-12-31"}}'
+```
+
+7. 查询回测任务列表
+
+```bash
+curl http://localhost:8080/api/v1/backtests \
+  -H "X-Tenant-ID: tenant-a"
+```
+
 > 说明：当前实现为启动阶段原型（内存存储），后续将迁移到 PostgreSQL / Redis / ClickHouse 并逐步接入 gin-vue-admin 现有权限与代码生成体系。

@@ -12,6 +12,8 @@ import (
 func New() http.Handler {
 	strategyService := service.NewStrategyService()
 	strategyHandler := api.NewStrategyHandler(strategyService)
+	backtestService := service.NewBacktestService(strategyService)
+	backtestHandler := api.NewBacktestHandler(backtestService)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -41,6 +43,25 @@ func New() http.Handler {
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
+	})))
+
+	mux.Handle("/api/v1/backtests", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			backtestHandler.List(w, r)
+		case http.MethodPost:
+			middleware.RequireRole(http.HandlerFunc(backtestHandler.Trigger), "Admin", "Quant Developer").ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})))
+
+	mux.Handle("/api/v1/backtests/", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		backtestHandler.Get(w, r)
 	})))
 
 	return mux
