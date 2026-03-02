@@ -288,3 +288,50 @@ CREATED -> SUBMITTED -> FILLED / CANCELLED
 ---
 
 > 当前仓库作为 QuantForge 的架构与需求基线文档，后续可按上述模块逐步落地到 gin-vue-admin 前后端代码结构。
+
+## 9. 开发启动（第一阶段落地）
+
+当前仓库已开始提供一个可运行的后端雏形（采用与 gin-vue-admin 一致的分层思路）：
+
+- `server/cmd/main.go`：应用入口
+- `server/internal/router`：路由装配
+- `server/internal/api`：HTTP Handler
+- `server/internal/service`：业务逻辑
+- `server/internal/model`：领域模型
+- `server/internal/middleware`：租户与角色中间件
+
+### 9.1 本地运行
+
+```bash
+cd server
+go run ./cmd
+```
+
+默认监听 `:8080`。
+
+### 9.2 示例接口
+
+1. 健康检查
+
+```bash
+curl http://localhost:8080/health
+```
+
+2. 创建策略（需要 Admin / Quant Developer）
+
+```bash
+curl -X POST http://localhost:8080/api/v1/strategies \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: tenant-a" \
+  -H "X-Role: Quant Developer" \
+  -d '{"name":"demo-strategy","version":"v1","parameters":{"symbol":"BTCUSDT"}}'
+```
+
+3. 查询策略列表
+
+```bash
+curl http://localhost:8080/api/v1/strategies \
+  -H "X-Tenant-ID: tenant-a"
+```
+
+> 说明：当前实现为启动阶段原型（内存存储），后续将迁移到 PostgreSQL / Redis / ClickHouse 并逐步接入 gin-vue-admin 现有权限与代码生成体系。
