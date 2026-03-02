@@ -31,11 +31,16 @@ func New() http.Handler {
 	})))
 
 	mux.Handle("/api/v1/strategies/", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			strategyHandler.Get(w, r)
+		case http.MethodPut:
+			middleware.RequireRole(http.HandlerFunc(strategyHandler.Update), "Admin", "Quant Developer").ServeHTTP(w, r)
+		case http.MethodDelete:
+			middleware.RequireRole(http.HandlerFunc(strategyHandler.Delete), "Admin").ServeHTTP(w, r)
+		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
 		}
-		strategyHandler.Get(w, r)
 	})))
 
 	return mux

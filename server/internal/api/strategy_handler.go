@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -38,8 +39,8 @@ func (h *StrategyHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StrategyHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/v1/strategies/")
-	if id == "" || strings.Contains(id, "/") {
+	id, ok := strategyIDFromPath(r.URL.Path)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "strategy not found"})
 		return
 	}
@@ -49,6 +50,50 @@ func (h *StrategyHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *StrategyHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id, ok := strategyIDFromPath(r.URL.Path)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "strategy not found"})
+		return
+	}
+	var req model.UpdateStrategyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return
+	}
+	updated, err := h.service.Update(middleware.TenantID(r.Context()), id, req)
+	if err != nil {
+		if errors.Is(err, service.ErrStrategyNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "strategy not found"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (h *StrategyHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, ok := strategyIDFromPath(r.URL.Path)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "strategy not found"})
+		return
+	}
+	if err := h.service.Delete(middleware.TenantID(r.Context()), id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "strategy not found"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func strategyIDFromPath(path string) (string, bool) {
+	id := strings.TrimPrefix(path, "/api/v1/strategies/")
+	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	return id, true
 }
 
 func writeJSON(w http.ResponseWriter, code int, payload any) {
