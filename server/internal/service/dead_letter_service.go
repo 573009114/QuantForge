@@ -51,7 +51,10 @@ func (s *DeadLetterService) Append(tenantID, jobType, jobID, reason, payload str
 		_ = s.pg.AppendDeadLetter(item)
 	}
 	if s.notifier != nil {
-		s.notifier.Notify("DEAD_LETTER_CREATED", map[string]any{"tenantId": tenantID, "jobType": jobType, "jobId": jobID, "reason": reason})
+		func() {
+			defer func() { _ = recover() }()
+			s.notifier.Notify("DEAD_LETTER_CREATED", map[string]any{"tenantId": tenantID, "jobType": jobType, "jobId": jobID, "reason": reason})
+		}()
 	}
 	return item
 }
