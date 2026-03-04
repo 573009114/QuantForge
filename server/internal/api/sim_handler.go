@@ -10,9 +10,14 @@ import (
 	"quantforge/server/internal/service"
 )
 
-type SimHandler struct{ service *service.SimService }
+type SimHandler struct {
+	service *service.SimService
+	audit   *service.AuditService
+}
 
-func NewSimHandler(service *service.SimService) *SimHandler { return &SimHandler{service: service} }
+func NewSimHandler(service *service.SimService, audit *service.AuditService) *SimHandler {
+	return &SimHandler{service: service, audit: audit}
+}
 
 func (h *SimHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	var req model.CreateAccountRequest
@@ -24,6 +29,9 @@ func (h *SimHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if h.audit != nil {
+		h.audit.Append(middleware.TenantID(r.Context()), middleware.UserID(r.Context()), "SIM_ACCOUNT_CREATE", "sim_account", item.ID)
 	}
 	writeJSON(w, http.StatusCreated, item)
 }
@@ -50,6 +58,9 @@ func (h *SimHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if h.audit != nil {
+		h.audit.Append(middleware.TenantID(r.Context()), middleware.UserID(r.Context()), "SIM_ORDER_CREATE", "sim_order", item.ID)
 	}
 	writeJSON(w, http.StatusCreated, item)
 }

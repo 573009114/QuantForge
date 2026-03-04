@@ -3,6 +3,8 @@ package router
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"time"
 
 	"quantforge/server/internal/api"
 	"quantforge/server/internal/middleware"
@@ -10,22 +12,41 @@ import (
 )
 
 func New() http.Handler {
+	authService := service.NewAuthService(os.Getenv("QF_JWT_SECRET"))
+	auditService := service.NewAuditService()
+	rateLimiter := middleware.NewTenantRateLimiter(300, time.Second)
+
+	authHandler := api.NewAuthHandler(authService)
+	auditHandler := api.NewAuditHandler(auditService)
 	strategyService := service.NewStrategyService()
-	strategyHandler := api.NewStrategyHandler(strategyService)
+	strategyHandler := api.NewStrategyHandler(strategyService, auditService)
 	backtestService := service.NewBacktestService(strategyService)
-	backtestHandler := api.NewBacktestHandler(backtestService)
+	backtestHandler := api.NewBacktestHandler(backtestService, auditService)
 	riskService := service.NewRiskService()
-	riskHandler := api.NewRiskHandler(riskService)
+	riskHandler := api.NewRiskHandler(riskService, auditService)
 	simService := service.NewSimService(riskService)
-	simHandler := api.NewSimHandler(simService)
+	simHandler := api.NewSimHandler(simService, auditService)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "quantforge"})
 	})
+	mux.HandleFunc("/api/v1/auth/token", authHandler.IssueToken)
 
-	mux.Handle("/api/v1/strategies", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	secure := func(h http.Handler) http.Handler {
+		return middleware.WithTenantAndRole(authService, rateLimiter.Middleware(h))
+	}
+
+	mux.Handle("/api/v1/audit/logs", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		auditHandler.List(w, r)
+	})))
+
+	mux.Handle("/api/v1/strategies", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			strategyHandler.List(w, r)
@@ -36,7 +57,7 @@ func New() http.Handler {
 		}
 	})))
 
-	mux.Handle("/api/v1/strategies/", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/v1/strategies/", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			strategyHandler.Get(w, r)
@@ -49,7 +70,7 @@ func New() http.Handler {
 		}
 	})))
 
-	mux.Handle("/api/v1/backtests", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/v1/backtests", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			backtestHandler.List(w, r)
@@ -60,7 +81,7 @@ func New() http.Handler {
 		}
 	})))
 
-	mux.Handle("/api/v1/backtests/", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/v1/backtests/", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -68,7 +89,7 @@ func New() http.Handler {
 		backtestHandler.Get(w, r)
 	})))
 
-	mux.Handle("/api/v1/risk/rules", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/v1/risk/rules", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			riskHandler.Get(w, r)
@@ -79,7 +100,7 @@ func New() http.Handler {
 		}
 	})))
 
-	mux.Handle("/api/v1/sim/accounts", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/v1/sim/accounts", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			simHandler.ListAccounts(w, r)
@@ -90,7 +111,7 @@ func New() http.Handler {
 		}
 	})))
 
-	mux.Handle("/api/v1/sim/orders", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/v1/sim/orders", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			simHandler.ListOrders(w, r)

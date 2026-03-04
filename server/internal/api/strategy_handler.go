@@ -13,10 +13,11 @@ import (
 
 type StrategyHandler struct {
 	service *service.StrategyService
+	audit   *service.AuditService
 }
 
-func NewStrategyHandler(service *service.StrategyService) *StrategyHandler {
-	return &StrategyHandler{service: service}
+func NewStrategyHandler(service *service.StrategyService, audit *service.AuditService) *StrategyHandler {
+	return &StrategyHandler{service: service, audit: audit}
 }
 
 func (h *StrategyHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +35,9 @@ func (h *StrategyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if h.audit != nil {
+		h.audit.Append(middleware.TenantID(r.Context()), middleware.UserID(r.Context()), "STRATEGY_CREATE", "strategy", created.ID)
 	}
 	writeJSON(w, http.StatusCreated, created)
 }
@@ -72,6 +76,9 @@ func (h *StrategyHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if h.audit != nil {
+		h.audit.Append(middleware.TenantID(r.Context()), middleware.UserID(r.Context()), "STRATEGY_UPDATE", "strategy", updated.ID)
+	}
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -84,6 +91,9 @@ func (h *StrategyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.Delete(middleware.TenantID(r.Context()), id); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "strategy not found"})
 		return
+	}
+	if h.audit != nil {
+		h.audit.Append(middleware.TenantID(r.Context()), middleware.UserID(r.Context()), "STRATEGY_DELETE", "strategy", id)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

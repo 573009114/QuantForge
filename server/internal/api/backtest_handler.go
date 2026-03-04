@@ -12,10 +12,11 @@ import (
 
 type BacktestHandler struct {
 	service *service.BacktestService
+	audit   *service.AuditService
 }
 
-func NewBacktestHandler(service *service.BacktestService) *BacktestHandler {
-	return &BacktestHandler{service: service}
+func NewBacktestHandler(service *service.BacktestService, audit *service.AuditService) *BacktestHandler {
+	return &BacktestHandler{service: service, audit: audit}
 }
 
 func (h *BacktestHandler) Trigger(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +29,9 @@ func (h *BacktestHandler) Trigger(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if h.audit != nil {
+		h.audit.Append(middleware.TenantID(r.Context()), middleware.UserID(r.Context()), "BACKTEST_TRIGGER", "backtest", item.ID)
 	}
 	writeJSON(w, http.StatusCreated, item)
 }

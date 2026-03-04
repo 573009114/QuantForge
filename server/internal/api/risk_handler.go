@@ -11,10 +11,11 @@ import (
 
 type RiskHandler struct {
 	service *service.RiskService
+	audit   *service.AuditService
 }
 
-func NewRiskHandler(service *service.RiskService) *RiskHandler {
-	return &RiskHandler{service: service}
+func NewRiskHandler(service *service.RiskService, audit *service.AuditService) *RiskHandler {
+	return &RiskHandler{service: service, audit: audit}
 }
 
 func (h *RiskHandler) Upsert(w http.ResponseWriter, r *http.Request) {
@@ -27,6 +28,9 @@ func (h *RiskHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if h.audit != nil {
+		h.audit.Append(middleware.TenantID(r.Context()), middleware.UserID(r.Context()), "RISK_RULE_UPSERT", "risk_rule", "tenant_rule")
 	}
 	writeJSON(w, http.StatusOK, item)
 }
