@@ -1,8 +1,10 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -20,11 +22,16 @@ func New() http.Handler {
 
 	var pg *store.PostgresStore
 	if os.Getenv("QF_STORAGE") == "postgres" {
-		if db, err := store.NewPostgresStoreFromEnv(); err == nil {
-			pg = db
-		} else {
-			log.Printf("postgres init failed, fallback to memory: %v", err)
+		db, err := store.NewPostgresStoreFromEnv()
+		if err != nil {
+			log.Fatalf("postgres init failed: %v", err)
 		}
+		if err = db.ApplyMigrationsFromDir("server/migrations"); err != nil {
+			if err = db.ApplyMigrationsFromDir("migrations"); err != nil {
+				log.Fatalf("postgres migrations failed: %v", err)
+			}
+		}
+		pg = db
 	}
 
 	authHandler := api.NewAuthHandler(authService)
@@ -56,6 +63,38 @@ func New() http.Handler {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "quantforge"})
+	})
+	mux.HandleFunc("/health/deps", func(w http.ResponseWriter, _ *http.Request) {
+		deps := map[string]string{"postgres": "disabled", "redis": "disabled"}
+		status := http.StatusOK
+		if os.Getenv("QF_STORAGE") == "postgres" {
+			deps["postgres"] = "up"
+			if pg == nil {
+				deps["postgres"] = "down"
+				status = http.StatusServiceUnavailable
+			} else {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				err := pg.Ping(ctx)
+				cancel()
+				if err != nil {
+					deps["postgres"] = "down"
+					status = http.StatusServiceUnavailable
+				}
+			}
+		}
+		if addr := os.Getenv("QF_REDIS_ADDR"); addr != "" {
+			deps["redis"] = "up"
+			conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+			if err != nil {
+				deps["redis"] = "down"
+				status = http.StatusServiceUnavailable
+			} else {
+				_ = conn.Close()
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": map[bool]string{true: "ok", false: "degraded"}[status == http.StatusOK], "deps": deps})
 	})
 	mux.HandleFunc("/api/v1/auth/token", authHandler.IssueToken)
 

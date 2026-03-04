@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"quantforge/server/internal/model"
@@ -33,6 +36,40 @@ func NewPostgresStoreFromEnv() (*PostgresStore, error) {
 		return nil, err
 	}
 	return &PostgresStore{db: db}, nil
+}
+
+func (s *PostgresStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+
+func (s *PostgresStore) ApplyMigrationsFromDir(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		files = append(files, filepath.Join(dir, e.Name()))
+	}
+	sort.Strings(files)
+	for _, file := range files {
+		buf, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(string(buf), ";")
+		for _, stmt := range parts {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if _, err = s.db.Exec(stmt); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *PostgresStore) SaveStrategy(item model.Strategy) error {

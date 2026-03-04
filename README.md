@@ -310,7 +310,21 @@ go run ./cmd
 默认监听 `:8080`。
 
 
-### 9.3 启用 PostgreSQL + Redis（实验）
+### 9.2 启用 PostgreSQL + Redis（实验）
+
+### 9.3 生产化启动建议（当前已支持）
+
+- 当 `QF_STORAGE=postgres` 时，服务启动会**强依赖 PostgreSQL**：
+  - 连接失败直接启动失败（不再静默回退内存）
+  - 启动时自动执行 `server/migrations/*.sql` 迁移
+- 建议在部署探针里增加依赖健康检查：
+
+```bash
+curl http://localhost:8080/health/deps
+```
+
+返回 `200` 表示依赖可用，`503` 表示至少一个依赖不可用。
+
 
 ```bash
 export QF_STORAGE=postgres
@@ -323,7 +337,7 @@ export QF_REDIS_ADDR="127.0.0.1:6379"
 - 当 `QF_STORAGE=postgres` 且数据库初始化成功时，策略/模拟账户/模拟订单/风控规则/审计日志会写入 PostgreSQL。
 - 当设置 `QF_REDIS_ADDR` 后，回测任务队列会改用 Redis 多优先级列表（`BRPOP`）而非进程内队列。
 
-### 9.2 示例接口
+### 9.4 示例接口
 
 1. 健康检查
 

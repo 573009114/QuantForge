@@ -107,3 +107,16 @@ func TestSandboxRunLifecycle(t *testing.T) {
 		t.Fatalf("expected 200 got %d", res.Code)
 	}
 }
+
+func TestDepsHealthEndpoint(t *testing.T) {
+	h := New()
+	req := httptest.NewRequest(http.MethodGet, "/health/deps", nil)
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200 got %d", res.Code)
+	}
+	if !bytes.Contains(res.Body.Bytes(), []byte("postgres")) || !bytes.Contains(res.Body.Bytes(), []byte("redis")) {
+		t.Fatalf("expected deps body got %s", res.Body.String())
+	}
+}
