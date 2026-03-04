@@ -11,14 +11,22 @@ import (
 )
 
 type DeadLetterService struct {
-	mu      sync.RWMutex
-	store   map[string][]model.DeadLetterJob
-	counter atomic.Uint64
-	pg      *store.PostgresStore
+	mu       sync.RWMutex
+	store    map[string][]model.DeadLetterJob
+	counter  atomic.Uint64
+	pg       *store.PostgresStore
+	notifier Notifier
 }
 
 func NewDeadLetterService() *DeadLetterService {
-	return &DeadLetterService{store: map[string][]model.DeadLetterJob{}}
+	return &DeadLetterService{store: map[string][]model.DeadLetterJob{}, notifier: NoopNotifier{}}
+}
+
+func (s *DeadLetterService) WithNotifier(n Notifier) *DeadLetterService {
+	if n != nil {
+		s.notifier = n
+	}
+	return s
 }
 
 func (s *DeadLetterService) WithPostgres(pg *store.PostgresStore) *DeadLetterService {
@@ -41,6 +49,9 @@ func (s *DeadLetterService) Append(tenantID, jobType, jobID, reason, payload str
 	s.mu.Unlock()
 	if s.pg != nil {
 		_ = s.pg.AppendDeadLetter(item)
+	}
+	if s.notifier != nil {
+		s.notifier.Notify("DEAD_LETTER_CREATED", map[string]any{"tenantId": tenantID, "jobType": jobType, "jobId": jobID, "reason": reason})
 	}
 	return item
 }

@@ -39,7 +39,8 @@ func New() http.Handler {
 		auditService.WithPostgres(pg)
 	}
 	auditHandler := api.NewAuditHandler(auditService)
-	dlqService := service.NewDeadLetterService()
+	notifier := service.NewNotifierFromEnv()
+	dlqService := service.NewDeadLetterService().WithNotifier(notifier)
 	if pg != nil {
 		dlqService.WithPostgres(pg)
 	}
@@ -66,7 +67,7 @@ func New() http.Handler {
 	authHandler := api.NewAuthHandler(authService)
 
 	public := func(h http.Handler) http.Handler {
-		return middleware.CORS(middleware.RequestID(middleware.SecurityHeaders(metrics.Middleware(h))))
+		return middleware.CORS(middleware.ForceHTTPS(middleware.RequestID(middleware.SecurityHeaders(metrics.Middleware(h)))))
 	}
 	secure := func(h http.Handler) http.Handler {
 		return public(middleware.WithTenantAndRole(authService, rateLimiter.Middleware(h)))
