@@ -55,3 +55,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TIMESTAMP NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_tenant_created ON audit_log(tenant_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS dead_letter_job (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  job_type TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dead_letter_tenant_created ON dead_letter_job(tenant_id, created_at DESC);

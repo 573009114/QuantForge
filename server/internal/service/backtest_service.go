@@ -26,6 +26,7 @@ type BacktestService struct {
 	queue           BacktestQueue
 	counter         atomic.Uint64
 	strategyService *StrategyService
+	dlq             *DeadLetterService
 }
 
 func NewBacktestService(strategyService *StrategyService) *BacktestService {
@@ -39,6 +40,11 @@ func NewBacktestService(strategyService *StrategyService) *BacktestService {
 		s.queue = newMemoryBacktestQueue()
 	}
 	go s.worker()
+	return s
+}
+
+func (s *BacktestService) WithDeadLetter(dlq *DeadLetterService) *BacktestService {
+	s.dlq = dlq
 	return s
 }
 
@@ -163,6 +169,9 @@ func (s *BacktestService) process(job queuedBacktest) {
 		done := time.Now()
 		item.CompletedAt = &done
 		s.store[job.tenantID][job.jobID] = item
+		if s.dlq != nil {
+			s.dlq.Append(job.tenantID, "backtest", job.jobID, item.ErrorMessage, fmt.Sprintf("retryCount=%d", item.RetryCount))
+		}
 		return
 	}
 

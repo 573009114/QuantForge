@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 type issueTokenResp struct {
@@ -118,5 +119,36 @@ func TestDepsHealthEndpoint(t *testing.T) {
 	}
 	if !bytes.Contains(res.Body.Bytes(), []byte("postgres")) || !bytes.Contains(res.Body.Bytes(), []byte("redis")) {
 		t.Fatalf("expected deps body got %s", res.Body.String())
+	}
+}
+
+func TestDeadLetterListEndpoint(t *testing.T) {
+	h := New()
+	createBody := []byte(`{"name":"alpha","version":"v1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/strategies", bytes.NewReader(createBody))
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	req.Header.Set("X-Role", "Quant Developer")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	var st createStrategyResp
+	_ = json.NewDecoder(res.Body).Decode(&st)
+
+	bt := []byte(`{"strategyId":"` + st.ID + `","maxRetries":0,"parameters":{"forceFail":true}}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/backtests", bytes.NewReader(bt))
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	req.Header.Set("X-Role", "Quant Developer")
+	res = httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected 201 got %d", res.Code)
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/dead-letter/jobs", nil)
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	res = httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200 got %d", res.Code)
 	}
 }

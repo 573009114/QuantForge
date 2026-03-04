@@ -491,6 +491,14 @@ curl -X DELETE http://localhost:8080/api/v1/sandbox/runs/run_1 \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
+
+19. 查询回测死信队列（失败任务）
+
+```bash
+curl http://localhost:8080/api/v1/dead-letter/jobs?limit=50 \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
 > 说明：当前实现为启动阶段原型（内存存储），后续将迁移到 PostgreSQL / Redis / ClickHouse 并逐步接入 gin-vue-admin 现有权限与代码生成体系。
 
 
@@ -513,6 +521,6 @@ curl -X DELETE http://localhost:8080/api/v1/sandbox/runs/run_1 \
 - HTTPS 强制、审计不可篡改持久化存储
 - 策略沙箱真实容器执行（当前仅内存模拟运行状态，尚未真正调用 Docker）
 - 真正撮合与行情驱动（滑点、手续费、持仓与权益实时计算）
-- 任务调度高可用（重试策略、优先级队列持久化、失败告警）
+- 任务调度高可用完善（当前已有重试、Redis 队列、死信记录；仍缺告警通知与运维看板）
 - 前端（gin-vue-admin web）页面与接口联调
 

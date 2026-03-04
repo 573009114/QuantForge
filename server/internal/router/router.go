@@ -39,12 +39,17 @@ func New() http.Handler {
 		auditService.WithPostgres(pg)
 	}
 	auditHandler := api.NewAuditHandler(auditService)
+	dlqService := service.NewDeadLetterService()
+	if pg != nil {
+		dlqService.WithPostgres(pg)
+	}
+	dlqHandler := api.NewDeadLetterHandler(dlqService)
 	strategyService := service.NewStrategyService()
 	if pg != nil {
 		strategyService.WithPostgres(pg)
 	}
 	strategyHandler := api.NewStrategyHandler(strategyService, auditService)
-	backtestService := service.NewBacktestService(strategyService)
+	backtestService := service.NewBacktestService(strategyService).WithDeadLetter(dlqService)
 	backtestHandler := api.NewBacktestHandler(backtestService, auditService)
 	riskService := service.NewRiskService()
 	if pg != nil {
@@ -101,6 +106,14 @@ func New() http.Handler {
 	secure := func(h http.Handler) http.Handler {
 		return middleware.WithTenantAndRole(authService, rateLimiter.Middleware(h))
 	}
+
+	mux.Handle("/api/v1/dead-letter/jobs", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		dlqHandler.List(w, r)
+	})))
 
 	mux.Handle("/api/v1/audit/logs", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

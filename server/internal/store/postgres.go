@@ -203,6 +203,32 @@ func (s *PostgresStore) LoadAudits(tenantID string, limit int) ([]model.AuditLog
 	return out, nil
 }
 
+func (s *PostgresStore) AppendDeadLetter(it model.DeadLetterJob) error {
+	_, err := s.db.Exec(`INSERT INTO dead_letter_job (id,tenant_id,job_type,job_id,reason,payload,created_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7)`, it.ID, it.TenantID, it.JobType, it.JobID, it.Reason, it.Payload, it.CreatedAt)
+	return err
+}
+
+func (s *PostgresStore) LoadDeadLetters(tenantID string, limit int) ([]model.DeadLetterJob, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT id,tenant_id,job_type,job_id,reason,payload,created_at FROM dead_letter_job WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.DeadLetterJob{}
+	for rows.Next() {
+		var it model.DeadLetterJob
+		if err = rows.Scan(&it.ID, &it.TenantID, &it.JobType, &it.JobID, &it.Reason, &it.Payload, &it.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, nil
+}
+
 func EnvAuditLimit() int {
 	n, _ := strconv.Atoi(os.Getenv("QF_AUDIT_LIMIT"))
 	if n <= 0 {
