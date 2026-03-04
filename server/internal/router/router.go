@@ -19,6 +19,7 @@ func New() http.Handler {
 	authService := service.NewAuthService(os.Getenv("QF_JWT_SECRET"))
 	auditService := service.NewAuditService()
 	rateLimiter := middleware.NewTenantRateLimiter(300, time.Second)
+	metrics := middleware.NewMetrics()
 
 	var pg *store.PostgresStore
 	if os.Getenv("QF_STORAGE") == "postgres" {
@@ -34,7 +35,6 @@ func New() http.Handler {
 		pg = db
 	}
 
-	authHandler := api.NewAuthHandler(authService)
 	if pg != nil {
 		auditService.WithPostgres(pg)
 	}
@@ -63,13 +63,21 @@ func New() http.Handler {
 	simHandler := api.NewSimHandler(simService, auditService)
 	sandboxService := service.NewSandboxService(strategyService)
 	sandboxHandler := api.NewSandboxHandler(sandboxService, auditService)
+	authHandler := api.NewAuthHandler(authService)
+
+	public := func(h http.Handler) http.Handler {
+		return middleware.CORS(middleware.RequestID(middleware.SecurityHeaders(metrics.Middleware(h))))
+	}
+	secure := func(h http.Handler) http.Handler {
+		return public(middleware.WithTenantAndRole(authService, rateLimiter.Middleware(h)))
+	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+	mux.Handle("/health", public(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "quantforge"})
-	})
-	mux.HandleFunc("/health/deps", func(w http.ResponseWriter, _ *http.Request) {
+	})))
+	mux.Handle("/health/deps", public(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		deps := map[string]string{"postgres": "disabled", "redis": "disabled"}
 		status := http.StatusOK
 		if os.Getenv("QF_STORAGE") == "postgres" {
@@ -100,12 +108,9 @@ func New() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": map[bool]string{true: "ok", false: "degraded"}[status == http.StatusOK], "deps": deps})
-	})
-	mux.HandleFunc("/api/v1/auth/token", authHandler.IssueToken)
-
-	secure := func(h http.Handler) http.Handler {
-		return middleware.WithTenantAndRole(authService, rateLimiter.Middleware(h))
-	}
+	})))
+	mux.Handle("/api/v1/auth/token", public(http.HandlerFunc(authHandler.IssueToken)))
+	mux.Handle("/ops/metrics", public(http.HandlerFunc(metrics.Handler)))
 
 	mux.Handle("/api/v1/dead-letter/jobs", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -114,7 +119,6 @@ func New() http.Handler {
 		}
 		dlqHandler.List(w, r)
 	})))
-
 	mux.Handle("/api/v1/audit/logs", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -122,7 +126,6 @@ func New() http.Handler {
 		}
 		auditHandler.List(w, r)
 	})))
-
 	mux.Handle("/api/v1/strategies", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -133,7 +136,6 @@ func New() http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})))
-
 	mux.Handle("/api/v1/strategies/", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -146,7 +148,6 @@ func New() http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})))
-
 	mux.Handle("/api/v1/backtests", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -157,7 +158,6 @@ func New() http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})))
-
 	mux.Handle("/api/v1/backtests/", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -165,7 +165,6 @@ func New() http.Handler {
 		}
 		backtestHandler.Get(w, r)
 	})))
-
 	mux.Handle("/api/v1/risk/rules", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -176,7 +175,6 @@ func New() http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})))
-
 	mux.Handle("/api/v1/sim/accounts", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -187,7 +185,16 @@ func New() http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})))
-
+	mux.Handle("/api/v1/sim/orders", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			simHandler.ListOrders(w, r)
+		case http.MethodPost:
+			middleware.RequireRole(http.HandlerFunc(simHandler.CreateOrder), "Admin", "Quant Developer").ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})))
 	mux.Handle("/api/v1/sandbox/runs", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -198,23 +205,12 @@ func New() http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})))
-
 	mux.Handle("/api/v1/sandbox/runs/", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			sandboxHandler.GetRun(w, r)
 		case http.MethodDelete:
 			middleware.RequireRole(http.HandlerFunc(sandboxHandler.StopRun), "Admin", "Risk Manager", "Quant Developer").ServeHTTP(w, r)
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})))
-	mux.Handle("/api/v1/sim/orders", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			simHandler.ListOrders(w, r)
-		case http.MethodPost:
-			middleware.RequireRole(http.HandlerFunc(simHandler.CreateOrder), "Admin", "Quant Developer").ServeHTTP(w, r)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}

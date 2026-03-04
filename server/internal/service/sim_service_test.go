@@ -21,7 +21,7 @@ func TestSimAccountAndOrderFlow(t *testing.T) {
 		t.Fatalf("expected FILLED got %s", ord.Status)
 	}
 	accounts := svc.ListAccounts("t1")
-	if len(accounts) != 1 || accounts[0].Balance != 9000 {
+	if len(accounts) != 1 || !(accounts[0].Balance < 9000 && accounts[0].Balance > 8990) {
 		t.Fatalf("unexpected balance: %+v", accounts)
 	}
 }

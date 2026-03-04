@@ -18,17 +18,18 @@ var (
 )
 
 type SimService struct {
-	mu          sync.RWMutex
-	accounts    map[string]map[string]model.SimAccount
-	orders      map[string]map[string]model.SimOrder
-	accCounter  atomic.Uint64
-	ordCounter  atomic.Uint64
-	riskService *RiskService
-	pg          *store.PostgresStore
+	mu           sync.RWMutex
+	accounts     map[string]map[string]model.SimAccount
+	orders       map[string]map[string]model.SimOrder
+	accCounter   atomic.Uint64
+	ordCounter   atomic.Uint64
+	riskService  *RiskService
+	pg           *store.PostgresStore
+	matchingConf MatchingConfig
 }
 
 func NewSimService(riskService *RiskService) *SimService {
-	return &SimService{accounts: map[string]map[string]model.SimAccount{}, orders: map[string]map[string]model.SimOrder{}, riskService: riskService}
+	return &SimService{accounts: map[string]map[string]model.SimAccount{}, orders: map[string]map[string]model.SimOrder{}, riskService: riskService, matchingConf: DefaultMatchingConfig()}
 }
 
 func (s *SimService) WithPostgres(pg *store.PostgresStore) *SimService {
@@ -89,11 +90,18 @@ func (s *SimService) CreateOrder(tenantID string, req model.CreateOrderRequest) 
 	if _, ok := s.orders[tenantID]; !ok {
 		s.orders[tenantID] = map[string]model.SimOrder{}
 	}
-	// auto lifecycle to SUBMITTED -> FILLED
 	t1 := now
 	ord.Status = model.OrderStatusSubmitted
 	ord.SubmittedAt = &t1
+	acc2, fillPrice, _, err := ExecuteOrder(acc, req, s.matchingConf)
+	if err != nil {
+		if errors.Is(err, ErrInsufficientBalance) {
+			return model.SimOrder{}, ErrInsufficientBalance
+		}
+		return model.SimOrder{}, err
+	}
 	t2 := now.Add(10 * time.Millisecond)
+	ord.Price = fillPrice
 	ord.Status = model.OrderStatusFilled
 	ord.FilledAt = &t2
 	ord.UpdatedAt = t2
@@ -101,17 +109,10 @@ func (s *SimService) CreateOrder(tenantID string, req model.CreateOrderRequest) 
 	if s.pg != nil {
 		_ = s.pg.SaveOrder(ord)
 	}
-	cost := req.Qty * req.Price
-	if ord.Side == "BUY" {
-		acc.Balance -= cost
-	} else {
-		acc.Balance += cost
-	}
-	acc.Equity = acc.Balance
-	acc.UpdatedAt = t2
-	s.accounts[tenantID][acc.ID] = acc
+	acc2.UpdatedAt = t2
+	s.accounts[tenantID][acc.ID] = acc2
 	if s.pg != nil {
-		_ = s.pg.SaveAccount(acc)
+		_ = s.pg.SaveAccount(acc2)
 	}
 	return ord, nil
 }

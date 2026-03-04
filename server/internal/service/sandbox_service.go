@@ -1,8 +1,12 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,16 +17,67 @@ import (
 
 var ErrSandboxRunNotFound = errors.New("sandbox run not found")
 
+type sandboxExecutor interface {
+	Run(ctx context.Context, strategyID string, policy model.SandboxPolicy, forceFail bool) (string, error)
+}
+
+type simulateExecutor struct{}
+
+func (simulateExecutor) Run(ctx context.Context, _ string, _ model.SandboxPolicy, forceFail bool) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "execution timeout", ctx.Err()
+	case <-time.After(20 * time.Millisecond):
+	}
+	if forceFail {
+		return "simulated strategy runtime error", errors.New("simulated failure")
+	}
+	return "finished successfully", nil
+}
+
+type dockerExecutor struct{ image string }
+
+func (d dockerExecutor) Run(ctx context.Context, _ string, policy model.SandboxPolicy, forceFail bool) (string, error) {
+	if forceFail {
+		return "simulated strategy runtime error", errors.New("simulated failure")
+	}
+	args := []string{"run", "--rm", "--memory", fmt.Sprintf("%dm", policy.MemoryMB), "--cpus", fmt.Sprintf("%.3f", float64(policy.CPUCoresMilli)/1000.0)}
+	if policy.NetworkNone {
+		args = append(args, "--network=none")
+	}
+	if policy.ReadOnlyFS {
+		args = append(args, "--read-only")
+	}
+	args = append(args, d.image)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	msg := strings.TrimSpace(string(out))
+	if msg == "" {
+		msg = "docker run completed"
+	}
+	return msg, err
+}
+
 type SandboxService struct {
 	mu              sync.RWMutex
 	store           map[string]map[string]model.SandboxRun
-	stops           map[string]chan struct{}
+	cancels         map[string]context.CancelFunc
 	counter         atomic.Uint64
 	strategyService *StrategyService
+	executor        sandboxExecutor
 }
 
 func NewSandboxService(strategyService *StrategyService) *SandboxService {
-	return &SandboxService{store: map[string]map[string]model.SandboxRun{}, stops: map[string]chan struct{}{}, strategyService: strategyService}
+	execMode := strings.ToLower(strings.TrimSpace(os.Getenv("QF_SANDBOX_EXECUTOR")))
+	var executor sandboxExecutor = simulateExecutor{}
+	if execMode == "docker" {
+		image := strings.TrimSpace(os.Getenv("QF_SANDBOX_IMAGE"))
+		if image == "" {
+			image = "strategy_runner"
+		}
+		executor = dockerExecutor{image: image}
+	}
+	return &SandboxService{store: map[string]map[string]model.SandboxRun{}, cancels: map[string]context.CancelFunc{}, strategyService: strategyService, executor: executor}
 }
 
 func (s *SandboxService) CreateRun(tenantID string, req model.CreateSandboxRunRequest) (model.SandboxRun, error) {
@@ -50,15 +105,17 @@ func (s *SandboxService) CreateRun(tenantID string, req model.CreateSandboxRunRe
 		s.store[tenantID] = map[string]model.SandboxRun{}
 	}
 	s.store[tenantID][id] = item
-	stop := make(chan struct{}, 1)
-	s.stops[tenantID+":"+id] = stop
 	s.mu.Unlock()
 
-	go s.execute(tenantID, id, req.ForceFail, stop)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(policy.TimeoutSec)*time.Second)
+	s.mu.Lock()
+	s.cancels[tenantID+":"+id] = cancel
+	s.mu.Unlock()
+	go s.execute(ctx, tenantID, id, req.ForceFail)
 	return item, nil
 }
 
-func (s *SandboxService) execute(tenantID, id string, forceFail bool, stop chan struct{}) {
+func (s *SandboxService) execute(ctx context.Context, tenantID, id string, forceFail bool) {
 	s.mu.Lock()
 	item := s.store[tenantID][id]
 	now := time.Now()
@@ -68,24 +125,20 @@ func (s *SandboxService) execute(tenantID, id string, forceFail bool, stop chan 
 	s.store[tenantID][id] = item
 	s.mu.Unlock()
 
-	runDuration := 20 * time.Millisecond
-	timeout := time.Duration(item.Policy.TimeoutSec) * time.Second
-	select {
-	case <-time.After(runDuration):
-		s.finishRun(tenantID, id, forceFail)
-	case <-time.After(timeout):
+	msg, err := s.executor.Run(ctx, item.StrategyID, item.Policy, forceFail)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		s.finishWithStatus(tenantID, id, model.SandboxRunTimeout, "execution timeout")
-	case <-stop:
-		s.finishWithStatus(tenantID, id, model.SandboxRunStopped, "stopped by user")
-	}
-}
-
-func (s *SandboxService) finishRun(tenantID, id string, forceFail bool) {
-	if forceFail {
-		s.finishWithStatus(tenantID, id, model.SandboxRunFailed, "simulated strategy runtime error")
 		return
 	}
-	s.finishWithStatus(tenantID, id, model.SandboxRunSucceeded, "finished successfully")
+	if errors.Is(err, context.Canceled) {
+		s.finishWithStatus(tenantID, id, model.SandboxRunStopped, "stopped by user")
+		return
+	}
+	if err != nil {
+		s.finishWithStatus(tenantID, id, model.SandboxRunFailed, msg)
+		return
+	}
+	s.finishWithStatus(tenantID, id, model.SandboxRunSucceeded, msg)
 }
 
 func (s *SandboxService) finishWithStatus(tenantID, id string, status model.SandboxRunStatus, msg string) {
@@ -104,21 +157,21 @@ func (s *SandboxService) finishWithStatus(tenantID, id string, status model.Sand
 	item.UpdatedAt = now
 	item.FinishedAt = &now
 	s.store[tenantID][id] = item
+	if c := s.cancels[tenantID+":"+id]; c != nil {
+		delete(s.cancels, tenantID+":"+id)
+	}
 }
 
 func (s *SandboxService) StopRun(tenantID, id string) error {
 	s.mu.RLock()
 	_, ok := s.store[tenantID][id]
-	stop := s.stops[tenantID+":"+id]
+	cancel := s.cancels[tenantID+":"+id]
 	s.mu.RUnlock()
 	if !ok {
 		return ErrSandboxRunNotFound
 	}
-	if stop != nil {
-		select {
-		case stop <- struct{}{}:
-		default:
-		}
+	if cancel != nil {
+		cancel()
 	}
 	return nil
 }
@@ -162,6 +215,11 @@ func mergePolicy(base, in model.SandboxPolicy) model.SandboxPolicy {
 	}
 	if in.ReadOnlyFS {
 		base.ReadOnlyFS = true
+	}
+	if v := strings.TrimSpace(os.Getenv("QF_SANDBOX_TIMEOUT_SEC")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.TimeoutSec = n
+		}
 	}
 	return base
 }

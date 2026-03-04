@@ -336,6 +336,13 @@ export QF_REDIS_ADDR="127.0.0.1:6379"
 - PostgreSQL 建表脚本：`server/migrations/001_init.sql`
 - 当 `QF_STORAGE=postgres` 且数据库初始化成功时，策略/模拟账户/模拟订单/风控规则/审计日志会写入 PostgreSQL。
 - 当设置 `QF_REDIS_ADDR` 后，回测任务队列会改用 Redis 多优先级列表（`BRPOP`）而非进程内队列。
+- 可选开启真实沙箱执行（Docker）：
+
+```bash
+export QF_SANDBOX_EXECUTOR=docker
+export QF_SANDBOX_IMAGE=strategy_runner
+```
+
 
 ### 9.4 示例接口
 
@@ -343,6 +350,12 @@ export QF_REDIS_ADDR="127.0.0.1:6379"
 
 ```bash
 curl http://localhost:8080/health
+```
+
+1.1 运维指标（Prometheus 文本）
+
+```bash
+curl http://localhost:8080/ops/metrics
 ```
 
 2. 创建策略（需要 Admin / Quant Developer）
@@ -511,15 +524,16 @@ curl http://localhost:8080/api/v1/dead-letter/jobs?limit=50 \
 - 审计日志记录与查询（append-only 内存实现）
 - 策略管理：创建、查询、更新、删除
 - 回测任务：触发、查询、优先级字段、失败重试（内存队列 + worker）
-- 模拟盘：账户创建、下单、订单查询，订单状态自动流转
+- 模拟盘：账户创建、下单、订单查询，含基础撮合（滑点+手续费+余额校验）
 - 风控：租户级规则配置 + 下单前风控校验
-- 沙箱运行：提交运行、状态流转、超时/手动停止（原型）
+- 沙箱运行：提交运行、状态流转、超时/手动停止（支持模拟执行与 Docker 执行器）
+- 运维可观测：依赖健康检查 + HTTP 指标导出（/ops/metrics）
 
 ### 未完成（下一步重点）
 
 - ClickHouse 行情存储与因子计算链路（PostgreSQL/Redis 已接入实验实现，仍需生产化）
 - HTTPS 强制、审计不可篡改持久化存储
-- 策略沙箱真实容器执行（当前仅内存模拟运行状态，尚未真正调用 Docker）
+- 策略沙箱生产化编排（当前已有 Docker 执行器，仍缺 K8s 编排、镜像安全扫描、资源配额治理）
 - 真正撮合与行情驱动（滑点、手续费、持仓与权益实时计算）
 - 任务调度高可用完善（当前已有重试、Redis 队列、死信记录；仍缺告警通知与运维看板）
 - 前端（gin-vue-admin web）页面与接口联调

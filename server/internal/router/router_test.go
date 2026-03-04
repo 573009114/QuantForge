@@ -152,3 +152,20 @@ func TestDeadLetterListEndpoint(t *testing.T) {
 		t.Fatalf("expected 200 got %d", res.Code)
 	}
 }
+
+func TestOpsMetricsEndpoint(t *testing.T) {
+	h := New()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+
+	req = httptest.NewRequest(http.MethodGet, "/ops/metrics", nil)
+	res = httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200 got %d", res.Code)
+	}
+	if !bytes.Contains(res.Body.Bytes(), []byte("qf_http_requests_total")) {
+		t.Fatalf("unexpected metrics body %s", res.Body.String())
+	}
+}
