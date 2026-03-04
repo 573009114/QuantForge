@@ -26,6 +26,8 @@ func New() http.Handler {
 	riskHandler := api.NewRiskHandler(riskService, auditService)
 	simService := service.NewSimService(riskService)
 	simHandler := api.NewSimHandler(simService, auditService)
+	sandboxService := service.NewSandboxService(strategyService)
+	sandboxHandler := api.NewSandboxHandler(sandboxService, auditService)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -111,6 +113,27 @@ func New() http.Handler {
 		}
 	})))
 
+	mux.Handle("/api/v1/sandbox/runs", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			sandboxHandler.ListRuns(w, r)
+		case http.MethodPost:
+			middleware.RequireRole(http.HandlerFunc(sandboxHandler.CreateRun), "Admin", "Quant Developer").ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})))
+
+	mux.Handle("/api/v1/sandbox/runs/", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			sandboxHandler.GetRun(w, r)
+		case http.MethodDelete:
+			middleware.RequireRole(http.HandlerFunc(sandboxHandler.StopRun), "Admin", "Risk Manager", "Quant Developer").ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})))
 	mux.Handle("/api/v1/sim/orders", secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

@@ -439,6 +439,30 @@ curl http://localhost:8080/api/v1/audit/logs \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
+
+16. 提交策略沙箱运行（需要 Admin / Quant Developer）
+
+```bash
+curl -X POST http://localhost:8080/api/v1/sandbox/runs \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"strategyId":"stg_1","policy":{"memoryMb":512,"cpuMilli":1000,"networkNone":true,"readOnlyFs":true,"timeoutSec":30}}'
+```
+
+17. 查询沙箱运行列表
+
+```bash
+curl http://localhost:8080/api/v1/sandbox/runs \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+18. 停止某次沙箱运行
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/sandbox/runs/run_1 \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
 > 说明：当前实现为启动阶段原型（内存存储），后续将迁移到 PostgreSQL / Redis / ClickHouse 并逐步接入 gin-vue-admin 现有权限与代码生成体系。
 
 
@@ -453,12 +477,13 @@ curl http://localhost:8080/api/v1/audit/logs \
 - 回测任务：触发、查询、优先级字段、失败重试（内存队列 + worker）
 - 模拟盘：账户创建、下单、订单查询，订单状态自动流转
 - 风控：租户级规则配置 + 下单前风控校验
+- 沙箱运行：提交运行、状态流转、超时/手动停止（原型）
 
 ### 未完成（下一步重点）
 
 - 持久化存储（PostgreSQL / Redis / ClickHouse）替换内存实现
 - HTTPS 强制、审计不可篡改持久化存储
-- 策略沙箱容器执行（Docker 资源限制 + 网络/文件隔离）
+- 策略沙箱真实容器执行（当前仅内存模拟运行状态，尚未真正调用 Docker）
 - 真正撮合与行情驱动（滑点、手续费、持仓与权益实时计算）
 - 任务调度高可用（重试策略、优先级队列持久化、失败告警）
 - 前端（gin-vue-admin web）页面与接口联调
