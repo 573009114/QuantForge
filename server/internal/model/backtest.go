@@ -12,18 +12,24 @@ const (
 )
 
 type BacktestJob struct {
-	ID          string                 `json:"id"`
-	TenantID    string                 `json:"tenantId"`
-	StrategyID  string                 `json:"strategyId"`
-	Status      BacktestStatus         `json:"status"`
-	Parameters  map[string]interface{} `json:"parameters"`
-	CreatedAt   time.Time              `json:"createdAt"`
-	UpdatedAt   time.Time              `json:"updatedAt"`
-	StartedAt   *time.Time             `json:"startedAt,omitempty"`
-	CompletedAt *time.Time             `json:"completedAt,omitempty"`
+	ID           string                 `json:"id"`
+	TenantID     string                 `json:"tenantId"`
+	StrategyID   string                 `json:"strategyId"`
+	Status       BacktestStatus         `json:"status"`
+	Priority     int                    `json:"priority"`
+	MaxRetries   int                    `json:"maxRetries"`
+	RetryCount   int                    `json:"retryCount"`
+	ErrorMessage string                 `json:"errorMessage,omitempty"`
+	Parameters   map[string]interface{} `json:"parameters"`
+	CreatedAt    time.Time              `json:"createdAt"`
+	UpdatedAt    time.Time              `json:"updatedAt"`
+	StartedAt    *time.Time             `json:"startedAt,omitempty"`
+	CompletedAt  *time.Time             `json:"completedAt,omitempty"`
 }
 
 type CreateBacktestRequest struct {
 	StrategyID string                 `json:"strategyId"`
+	Priority   int                    `json:"priority"`
+	MaxRetries int                    `json:"maxRetries"`
 	Parameters map[string]interface{} `json:"parameters"`
 }
