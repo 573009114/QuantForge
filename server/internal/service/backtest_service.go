@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -22,8 +23,7 @@ type queuedBacktest struct {
 type BacktestService struct {
 	mu              sync.RWMutex
 	store           map[string]map[string]model.BacktestJob
-	pending         map[int][]queuedBacktest
-	notify          chan struct{}
+	queue           BacktestQueue
 	counter         atomic.Uint64
 	strategyService *StrategyService
 }
@@ -31,9 +31,12 @@ type BacktestService struct {
 func NewBacktestService(strategyService *StrategyService) *BacktestService {
 	s := &BacktestService{
 		store:           make(map[string]map[string]model.BacktestJob),
-		pending:         make(map[int][]queuedBacktest),
-		notify:          make(chan struct{}, 1),
 		strategyService: strategyService,
+	}
+	if q, ok := newRedisBacktestQueueFromEnv(); ok {
+		s.queue = q
+	} else {
+		s.queue = newMemoryBacktestQueue()
 	}
 	go s.worker()
 	return s
@@ -78,9 +81,8 @@ func (s *BacktestService) Trigger(tenantID string, req model.CreateBacktestReque
 		s.store[tenantID] = make(map[string]model.BacktestJob)
 	}
 	s.store[tenantID][id] = item
-	s.pending[priority] = append(s.pending[priority], queuedBacktest{tenantID: tenantID, jobID: id})
 	s.mu.Unlock()
-	s.signalWorker()
+	_ = s.queue.Enqueue(priority, queuedBacktest{tenantID: tenantID, jobID: id})
 	return item, nil
 }
 
@@ -112,29 +114,15 @@ func (s *BacktestService) Get(tenantID, id string) (model.BacktestJob, error) {
 }
 
 func (s *BacktestService) worker() {
+	ctx := context.Background()
 	for {
-		job, ok := s.nextPendingJob()
-		if !ok {
-			<-s.notify
+		job, ok, err := s.queue.Dequeue(ctx)
+		if err != nil || !ok {
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 		s.process(job)
 	}
-}
-
-func (s *BacktestService) nextPendingJob() (queuedBacktest, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for p := 10; p >= 1; p-- {
-		queue := s.pending[p]
-		if len(queue) == 0 {
-			continue
-		}
-		job := queue[0]
-		s.pending[p] = queue[1:]
-		return job, true
-	}
-	return queuedBacktest{}, false
 }
 
 func (s *BacktestService) process(job queuedBacktest) {
@@ -168,8 +156,7 @@ func (s *BacktestService) process(job queuedBacktest) {
 		if item.RetryCount <= item.MaxRetries {
 			item.Status = model.BacktestStatusQueued
 			s.store[job.tenantID][job.jobID] = item
-			s.pending[item.Priority] = append(s.pending[item.Priority], queuedBacktest{tenantID: job.tenantID, jobID: job.jobID})
-			go s.signalWorker()
+			_ = s.queue.Enqueue(item.Priority, queuedBacktest{tenantID: job.tenantID, jobID: job.jobID})
 			return
 		}
 		item.Status = model.BacktestStatusFailed
@@ -185,11 +172,4 @@ func (s *BacktestService) process(job queuedBacktest) {
 	item.CompletedAt = &done
 	item.UpdatedAt = done
 	s.store[job.tenantID][job.jobID] = item
-}
-
-func (s *BacktestService) signalWorker() {
-	select {
-	case s.notify <- struct{}{}:
-	default:
-	}
 }

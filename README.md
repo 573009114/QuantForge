@@ -309,6 +309,20 @@ go run ./cmd
 
 默认监听 `:8080`。
 
+
+### 9.3 启用 PostgreSQL + Redis（实验）
+
+```bash
+export QF_STORAGE=postgres
+export QF_PG_DRIVER=postgres
+export QF_PG_DSN="postgres://user:pass@127.0.0.1:5432/quantforge?sslmode=disable"
+export QF_REDIS_ADDR="127.0.0.1:6379"
+```
+
+- PostgreSQL 建表脚本：`server/migrations/001_init.sql`
+- 当 `QF_STORAGE=postgres` 且数据库初始化成功时，策略/模拟账户/模拟订单/风控规则/审计日志会写入 PostgreSQL。
+- 当设置 `QF_REDIS_ADDR` 后，回测任务队列会改用 Redis 多优先级列表（`BRPOP`）而非进程内队列。
+
 ### 9.2 示例接口
 
 1. 健康检查
@@ -481,7 +495,7 @@ curl -X DELETE http://localhost:8080/api/v1/sandbox/runs/run_1 \
 
 ### 未完成（下一步重点）
 
-- 持久化存储（PostgreSQL / Redis / ClickHouse）替换内存实现
+- ClickHouse 行情存储与因子计算链路（PostgreSQL/Redis 已接入实验实现，仍需生产化）
 - HTTPS 强制、审计不可篡改持久化存储
 - 策略沙箱真实容器执行（当前仅内存模拟运行状态，尚未真正调用 Docker）
 - 真正撮合与行情驱动（滑点、手续费、持仓与权益实时计算）

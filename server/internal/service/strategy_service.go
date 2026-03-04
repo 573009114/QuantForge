@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"quantforge/server/internal/model"
+	"quantforge/server/internal/store"
 )
 
 var ErrStrategyNotFound = errors.New("strategy not found")
@@ -18,10 +19,16 @@ type StrategyService struct {
 	mu      sync.RWMutex
 	store   map[string]map[string]model.Strategy
 	counter atomic.Uint64
+	pg      *store.PostgresStore
 }
 
 func NewStrategyService() *StrategyService {
 	return &StrategyService{store: make(map[string]map[string]model.Strategy)}
+}
+
+func (s *StrategyService) WithPostgres(pg *store.PostgresStore) *StrategyService {
+	s.pg = pg
+	return s
 }
 
 func (s *StrategyService) Create(tenantID string, req model.CreateStrategyRequest) (model.Strategy, error) {
@@ -48,6 +55,9 @@ func (s *StrategyService) Create(tenantID string, req model.CreateStrategyReques
 		s.store[tenantID] = make(map[string]model.Strategy)
 	}
 	s.store[tenantID][item.ID] = item
+	if s.pg != nil {
+		_ = s.pg.SaveStrategy(item)
+	}
 	return item, nil
 }
 
@@ -58,6 +68,11 @@ func (s *StrategyService) List(tenantID string) []model.Strategy {
 	strategies := make([]model.Strategy, 0, len(s.store[tenantID]))
 	for _, st := range s.store[tenantID] {
 		strategies = append(strategies, st)
+	}
+	if s.pg != nil {
+		if items, err := s.pg.LoadStrategies(tenantID); err == nil {
+			return items
+		}
 	}
 	sort.Slice(strategies, func(i, j int) bool {
 		return strategies[i].CreatedAt.After(strategies[j].CreatedAt)
@@ -101,6 +116,9 @@ func (s *StrategyService) Update(tenantID, strategyID string, req model.UpdateSt
 	}
 	item.UpdatedAt = time.Now()
 	s.store[tenantID][strategyID] = item
+	if s.pg != nil {
+		_ = s.pg.SaveStrategy(item)
+	}
 	return item, nil
 }
 
@@ -111,6 +129,9 @@ func (s *StrategyService) Delete(tenantID, strategyID string) error {
 		return ErrStrategyNotFound
 	}
 	delete(s.store[tenantID], strategyID)
+	if s.pg != nil {
+		_ = s.pg.DeleteStrategy(tenantID, strategyID)
+	}
 	return nil
 }
 

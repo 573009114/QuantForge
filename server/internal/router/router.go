@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"quantforge/server/internal/api"
 	"quantforge/server/internal/middleware"
 	"quantforge/server/internal/service"
+	"quantforge/server/internal/store"
 )
 
 func New() http.Handler {
@@ -16,15 +18,36 @@ func New() http.Handler {
 	auditService := service.NewAuditService()
 	rateLimiter := middleware.NewTenantRateLimiter(300, time.Second)
 
+	var pg *store.PostgresStore
+	if os.Getenv("QF_STORAGE") == "postgres" {
+		if db, err := store.NewPostgresStoreFromEnv(); err == nil {
+			pg = db
+		} else {
+			log.Printf("postgres init failed, fallback to memory: %v", err)
+		}
+	}
+
 	authHandler := api.NewAuthHandler(authService)
+	if pg != nil {
+		auditService.WithPostgres(pg)
+	}
 	auditHandler := api.NewAuditHandler(auditService)
 	strategyService := service.NewStrategyService()
+	if pg != nil {
+		strategyService.WithPostgres(pg)
+	}
 	strategyHandler := api.NewStrategyHandler(strategyService, auditService)
 	backtestService := service.NewBacktestService(strategyService)
 	backtestHandler := api.NewBacktestHandler(backtestService, auditService)
 	riskService := service.NewRiskService()
+	if pg != nil {
+		riskService.WithPostgres(pg)
+	}
 	riskHandler := api.NewRiskHandler(riskService, auditService)
 	simService := service.NewSimService(riskService)
+	if pg != nil {
+		simService.WithPostgres(pg)
+	}
 	simHandler := api.NewSimHandler(simService, auditService)
 	sandboxService := service.NewSandboxService(strategyService)
 	sandboxHandler := api.NewSandboxHandler(sandboxService, auditService)

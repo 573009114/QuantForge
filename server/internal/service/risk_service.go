@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"quantforge/server/internal/model"
+	"quantforge/server/internal/store"
 )
 
 var ErrRiskViolation = errors.New("risk violation")
@@ -14,10 +15,16 @@ var ErrRiskViolation = errors.New("risk violation")
 type RiskService struct {
 	mu    sync.RWMutex
 	rules map[string]model.RiskRule
+	pg    *store.PostgresStore
 }
 
 func NewRiskService() *RiskService {
 	return &RiskService{rules: map[string]model.RiskRule{}}
+}
+
+func (s *RiskService) WithPostgres(pg *store.PostgresStore) *RiskService {
+	s.pg = pg
+	return s
 }
 
 func (s *RiskService) UpsertRule(tenantID string, req model.UpsertRiskRuleRequest) (model.RiskRule, error) {
@@ -34,6 +41,9 @@ func (s *RiskService) UpsertRule(tenantID string, req model.UpsertRiskRuleReques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rules[tenantID] = rule
+	if s.pg != nil {
+		_ = s.pg.SaveRiskRule(rule)
+	}
 	return rule, nil
 }
 
@@ -41,6 +51,14 @@ func (s *RiskService) GetRule(tenantID string) (model.RiskRule, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	r, ok := s.rules[tenantID]
+	if ok {
+		return r, true
+	}
+	if s.pg != nil {
+		if it, found, err := s.pg.LoadRiskRule(tenantID); err == nil && found {
+			return it, true
+		}
+	}
 	return r, ok
 }
 

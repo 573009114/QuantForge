@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"quantforge/server/internal/model"
+	"quantforge/server/internal/store"
 )
 
 var (
@@ -23,10 +24,16 @@ type SimService struct {
 	accCounter  atomic.Uint64
 	ordCounter  atomic.Uint64
 	riskService *RiskService
+	pg          *store.PostgresStore
 }
 
 func NewSimService(riskService *RiskService) *SimService {
 	return &SimService{accounts: map[string]map[string]model.SimAccount{}, orders: map[string]map[string]model.SimOrder{}, riskService: riskService}
+}
+
+func (s *SimService) WithPostgres(pg *store.PostgresStore) *SimService {
+	s.pg = pg
+	return s
 }
 
 func (s *SimService) CreateAccount(tenantID string, req model.CreateAccountRequest) (model.SimAccount, error) {
@@ -41,12 +48,20 @@ func (s *SimService) CreateAccount(tenantID string, req model.CreateAccountReque
 		s.accounts[tenantID] = map[string]model.SimAccount{}
 	}
 	s.accounts[tenantID][acc.ID] = acc
+	if s.pg != nil {
+		_ = s.pg.SaveAccount(acc)
+	}
 	return acc, nil
 }
 
 func (s *SimService) ListAccounts(tenantID string) []model.SimAccount {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.pg != nil {
+		if items, err := s.pg.LoadAccounts(tenantID); err == nil {
+			return items
+		}
+	}
 	res := make([]model.SimAccount, 0, len(s.accounts[tenantID]))
 	for _, a := range s.accounts[tenantID] {
 		res = append(res, a)
@@ -83,6 +98,9 @@ func (s *SimService) CreateOrder(tenantID string, req model.CreateOrderRequest) 
 	ord.FilledAt = &t2
 	ord.UpdatedAt = t2
 	s.orders[tenantID][ord.ID] = ord
+	if s.pg != nil {
+		_ = s.pg.SaveOrder(ord)
+	}
 	cost := req.Qty * req.Price
 	if ord.Side == "BUY" {
 		acc.Balance -= cost
@@ -92,12 +110,20 @@ func (s *SimService) CreateOrder(tenantID string, req model.CreateOrderRequest) 
 	acc.Equity = acc.Balance
 	acc.UpdatedAt = t2
 	s.accounts[tenantID][acc.ID] = acc
+	if s.pg != nil {
+		_ = s.pg.SaveAccount(acc)
+	}
 	return ord, nil
 }
 
 func (s *SimService) ListOrders(tenantID string) []model.SimOrder {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.pg != nil {
+		if items, err := s.pg.LoadOrders(tenantID); err == nil {
+			return items
+		}
+	}
 	res := make([]model.SimOrder, 0, len(s.orders[tenantID]))
 	for _, o := range s.orders[tenantID] {
 		res = append(res, o)
