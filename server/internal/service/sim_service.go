@@ -17,15 +17,16 @@ var (
 )
 
 type SimService struct {
-	mu         sync.RWMutex
-	accounts   map[string]map[string]model.SimAccount
-	orders     map[string]map[string]model.SimOrder
-	accCounter atomic.Uint64
-	ordCounter atomic.Uint64
+	mu          sync.RWMutex
+	accounts    map[string]map[string]model.SimAccount
+	orders      map[string]map[string]model.SimOrder
+	accCounter  atomic.Uint64
+	ordCounter  atomic.Uint64
+	riskService *RiskService
 }
 
-func NewSimService() *SimService {
-	return &SimService{accounts: map[string]map[string]model.SimAccount{}, orders: map[string]map[string]model.SimOrder{}}
+func NewSimService(riskService *RiskService) *SimService {
+	return &SimService{accounts: map[string]map[string]model.SimAccount{}, orders: map[string]map[string]model.SimOrder{}, riskService: riskService}
 }
 
 func (s *SimService) CreateAccount(tenantID string, req model.CreateAccountRequest) (model.SimAccount, error) {
@@ -62,6 +63,11 @@ func (s *SimService) CreateOrder(tenantID string, req model.CreateOrderRequest) 
 	acc, ok := s.accounts[tenantID][req.AccountID]
 	if !ok {
 		return model.SimOrder{}, ErrAccountNotFound
+	}
+	if s.riskService != nil {
+		if err := s.riskService.ValidateOrder(tenantID, acc, req.Qty*req.Price); err != nil {
+			return model.SimOrder{}, err
+		}
 	}
 	now := time.Now()
 	ord := model.SimOrder{ID: fmt.Sprintf("ord_%d", s.ordCounter.Add(1)), TenantID: tenantID, AccountID: req.AccountID, Symbol: strings.ToUpper(strings.TrimSpace(req.Symbol)), Side: strings.ToUpper(strings.TrimSpace(req.Side)), Qty: req.Qty, Price: req.Price, Status: model.OrderStatusCreated, CreatedAt: now, UpdatedAt: now}

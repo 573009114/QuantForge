@@ -44,6 +44,10 @@ func (h *SimHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "account not found"})
 			return
 		}
+		if errors.Is(err, service.ErrRiskViolation) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

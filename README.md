@@ -398,4 +398,22 @@ curl http://localhost:8080/api/v1/sim/orders \
   -H "X-Tenant-ID: tenant-a"
 ```
 
+
+11. 配置租户风控规则（需要 Admin / Risk Manager）
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/risk/rules \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: tenant-a" \
+  -H "X-Role: Risk Manager" \
+  -d '{"maxOrderNotional":100000,"maxDailyLoss":200000,"maxPositionPercent":0.3}'
+```
+
+12. 查询租户风控规则
+
+```bash
+curl http://localhost:8080/api/v1/risk/rules \
+  -H "X-Tenant-ID: tenant-a"
+```
+
 > 说明：当前实现为启动阶段原型（内存存储），后续将迁移到 PostgreSQL / Redis / ClickHouse 并逐步接入 gin-vue-admin 现有权限与代码生成体系。

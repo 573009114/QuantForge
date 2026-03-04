@@ -14,7 +14,9 @@ func New() http.Handler {
 	strategyHandler := api.NewStrategyHandler(strategyService)
 	backtestService := service.NewBacktestService(strategyService)
 	backtestHandler := api.NewBacktestHandler(backtestService)
-	simService := service.NewSimService()
+	riskService := service.NewRiskService()
+	riskHandler := api.NewRiskHandler(riskService)
+	simService := service.NewSimService(riskService)
 	simHandler := api.NewSimHandler(simService)
 
 	mux := http.NewServeMux()
@@ -64,6 +66,17 @@ func New() http.Handler {
 			return
 		}
 		backtestHandler.Get(w, r)
+	})))
+
+	mux.Handle("/api/v1/risk/rules", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			riskHandler.Get(w, r)
+		case http.MethodPut:
+			middleware.RequireRole(http.HandlerFunc(riskHandler.Upsert), "Admin", "Risk Manager").ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
 	})))
 
 	mux.Handle("/api/v1/sim/accounts", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
