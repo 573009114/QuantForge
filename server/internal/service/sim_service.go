@@ -1,0 +1,100 @@
+package service
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"quantforge/server/internal/model"
+)
+
+var (
+	ErrAccountNotFound = errors.New("account not found")
+	ErrOrderNotFound   = errors.New("order not found")
+)
+
+type SimService struct {
+	mu         sync.RWMutex
+	accounts   map[string]map[string]model.SimAccount
+	orders     map[string]map[string]model.SimOrder
+	accCounter atomic.Uint64
+	ordCounter atomic.Uint64
+}
+
+func NewSimService() *SimService {
+	return &SimService{accounts: map[string]map[string]model.SimAccount{}, orders: map[string]map[string]model.SimOrder{}}
+}
+
+func (s *SimService) CreateAccount(tenantID string, req model.CreateAccountRequest) (model.SimAccount, error) {
+	if req.Balance <= 0 {
+		return model.SimAccount{}, errors.New("balance must be positive")
+	}
+	now := time.Now()
+	acc := model.SimAccount{ID: fmt.Sprintf("acc_%d", s.accCounter.Add(1)), TenantID: tenantID, Balance: req.Balance, Equity: req.Balance, CreatedAt: now, UpdatedAt: now}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.accounts[tenantID]; !ok {
+		s.accounts[tenantID] = map[string]model.SimAccount{}
+	}
+	s.accounts[tenantID][acc.ID] = acc
+	return acc, nil
+}
+
+func (s *SimService) ListAccounts(tenantID string) []model.SimAccount {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make([]model.SimAccount, 0, len(s.accounts[tenantID]))
+	for _, a := range s.accounts[tenantID] {
+		res = append(res, a)
+	}
+	return res
+}
+
+func (s *SimService) CreateOrder(tenantID string, req model.CreateOrderRequest) (model.SimOrder, error) {
+	if req.AccountID == "" || strings.TrimSpace(req.Symbol) == "" || req.Qty <= 0 || req.Price <= 0 {
+		return model.SimOrder{}, errors.New("invalid order request")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	acc, ok := s.accounts[tenantID][req.AccountID]
+	if !ok {
+		return model.SimOrder{}, ErrAccountNotFound
+	}
+	now := time.Now()
+	ord := model.SimOrder{ID: fmt.Sprintf("ord_%d", s.ordCounter.Add(1)), TenantID: tenantID, AccountID: req.AccountID, Symbol: strings.ToUpper(strings.TrimSpace(req.Symbol)), Side: strings.ToUpper(strings.TrimSpace(req.Side)), Qty: req.Qty, Price: req.Price, Status: model.OrderStatusCreated, CreatedAt: now, UpdatedAt: now}
+	if _, ok := s.orders[tenantID]; !ok {
+		s.orders[tenantID] = map[string]model.SimOrder{}
+	}
+	// auto lifecycle to SUBMITTED -> FILLED
+	t1 := now
+	ord.Status = model.OrderStatusSubmitted
+	ord.SubmittedAt = &t1
+	t2 := now.Add(10 * time.Millisecond)
+	ord.Status = model.OrderStatusFilled
+	ord.FilledAt = &t2
+	ord.UpdatedAt = t2
+	s.orders[tenantID][ord.ID] = ord
+	cost := req.Qty * req.Price
+	if ord.Side == "BUY" {
+		acc.Balance -= cost
+	} else {
+		acc.Balance += cost
+	}
+	acc.Equity = acc.Balance
+	acc.UpdatedAt = t2
+	s.accounts[tenantID][acc.ID] = acc
+	return ord, nil
+}
+
+func (s *SimService) ListOrders(tenantID string) []model.SimOrder {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make([]model.SimOrder, 0, len(s.orders[tenantID]))
+	for _, o := range s.orders[tenantID] {
+		res = append(res, o)
+	}
+	return res
+}

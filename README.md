@@ -370,4 +370,32 @@ curl http://localhost:8080/api/v1/backtests \
   -H "X-Tenant-ID: tenant-a"
 ```
 
+
+8. 创建模拟账户（需要 Admin / Quant Developer）
+
+```bash
+curl -X POST http://localhost:8080/api/v1/sim/accounts \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: tenant-a" \
+  -H "X-Role: Quant Developer" \
+  -d '{"balance":100000}'
+```
+
+9. 模拟下单（状态机会自动推进到 FILLED）
+
+```bash
+curl -X POST http://localhost:8080/api/v1/sim/orders \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: tenant-a" \
+  -H "X-Role: Quant Developer" \
+  -d '{"accountId":"acc_1","symbol":"BTCUSDT","side":"BUY","qty":0.1,"price":50000}'
+```
+
+10. 查询模拟订单
+
+```bash
+curl http://localhost:8080/api/v1/sim/orders \
+  -H "X-Tenant-ID: tenant-a"
+```
+
 > 说明：当前实现为启动阶段原型（内存存储），后续将迁移到 PostgreSQL / Redis / ClickHouse 并逐步接入 gin-vue-admin 现有权限与代码生成体系。

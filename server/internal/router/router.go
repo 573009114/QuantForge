@@ -14,6 +14,8 @@ func New() http.Handler {
 	strategyHandler := api.NewStrategyHandler(strategyService)
 	backtestService := service.NewBacktestService(strategyService)
 	backtestHandler := api.NewBacktestHandler(backtestService)
+	simService := service.NewSimService()
+	simHandler := api.NewSimHandler(simService)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -62,6 +64,28 @@ func New() http.Handler {
 			return
 		}
 		backtestHandler.Get(w, r)
+	})))
+
+	mux.Handle("/api/v1/sim/accounts", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			simHandler.ListAccounts(w, r)
+		case http.MethodPost:
+			middleware.RequireRole(http.HandlerFunc(simHandler.CreateAccount), "Admin", "Quant Developer").ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})))
+
+	mux.Handle("/api/v1/sim/orders", middleware.WithTenantAndRole(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			simHandler.ListOrders(w, r)
+		case http.MethodPost:
+			middleware.RequireRole(http.HandlerFunc(simHandler.CreateOrder), "Admin", "Quant Developer").ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
 	})))
 
 	return mux
